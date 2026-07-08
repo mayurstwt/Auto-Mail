@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg:        #080808;
+    --surface:   #111111;
+    --surface2:  #1a1a1a;
+    --border:    #1f1f1f;
+    --border2:   #2e2e2e;
+    --text:      #ffffff;
+    --text2:     #888888;
+    --text3:     #444444;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
+}
+
+@layer components {
+
+  /* ── Cards ─────────────────────────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .card-hover {
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .card-hover:hover {
+    border-color: var(--border2);
+    background: var(--surface2);
+  }
+
+  /* ── Form controls ─────────────────────────────────────────────── */
+  .form-control {
+    @apply w-full rounded-lg px-3.5 py-2.5 text-sm text-white
+           placeholder-[#444] transition-all duration-150
+           focus:outline-none;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+  }
+  .form-control:focus {
+    border-color: #555;
+    box-shadow: 0 0 0 1px #555;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2
+           px-4 py-2.5 rounded-lg text-sm font-medium
+           transition-all duration-150 focus:outline-none
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn;
+    background: #fff;
+    color: #000;
+  }
+  .btn-primary:hover:not(:disabled) { background: #e0e0e0; }
+  .btn-ghost {
+    @apply btn;
+    background: transparent;
+    color: var(--text2);
+    border: 1px solid var(--border2);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: #555;
+    color: #fff;
+  }
+  .btn-danger {
+    @apply btn;
+    background: transparent;
+    color: #666;
+    border: 1px solid transparent;
+  }
+  .btn-danger:hover:not(:disabled) { color: #fff; border-color: #333; }
+
+  /* ── Tabs ──────────────────────────────────────────────────────── */
+  .tab {
+    @apply px-5 py-2 text-sm font-medium rounded-lg transition-all duration-150 cursor-pointer;
+    color: var(--text2);
+  }
+  .tab:hover { color: #ccc; }
+  .tab-active {
+    color: #fff;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+  }
+
+  /* ── Status badges ─────────────────────────────────────────────── */
+  .badge-sent {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+           text-xs font-medium;
+    background: rgba(255,255,255,0.08);
+    color: #ccc;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .badge-failed {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+           text-xs font-medium;
+    background: rgba(255,255,255,0.04);
+    color: #666;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* ── Upload zone ───────────────────────────────────────────────── */
+  .upload-zone {
+    @apply w-full flex items-center gap-3 px-4 py-3 rounded-lg
+           text-sm font-medium transition-all duration-150
+           border-2 border-dashed cursor-pointer;
+    border-color: var(--border2);
+    color: var(--text2);
+  }
+  .upload-zone:hover {
+    border-color: #555;
+    color: #fff;
+  }
+  .upload-zone-active {
+    border-color: #555;
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+  }
+
+  /* ── Modal overlay ─────────────────────────────────────────────── */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(4px);
+  }
+  .modal-box {
+    @apply w-full max-w-lg rounded-xl p-6 flex flex-col gap-5;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+@layer utilities {
+  .text-dim { color: var(--text2); }
+  .text-dimmer { color: var(--text3); }
+  .border-base { border-color: var(--border); }
+  .border-raised { border-color: var(--border2); }
+  .bg-surface { background: var(--surface); }
+  .bg-surface2 { background: var(--surface2); }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
