@@ -20,6 +20,7 @@ export interface Profile {
   body: string;
   resumeName: string;    // original filename, stored for display
   resumeMimeType: string;
+  resumeData?: string;   // base64-encoded resume file content
   createdAt: number;
   updatedAt: number;
 }
@@ -41,6 +42,7 @@ export interface SendEmailsResponse {
 
 /** Parsed multipart form data on the server */
 export interface ParsedFormData {
+  profileName?: string;
   subject: string;
   body: string;
   emails: string;

@@ -154,6 +154,77 @@
     max-height: 90vh;
     overflow-y: auto;
   }
+
+  /* ── Auth page styling ─────────────────────────────────────────── */
+  .auth-page {
+    @apply min-h-screen w-full flex items-center justify-center p-4 relative overflow-hidden;
+    background: #040404;
+  }
+
+  .auth-glow {
+    @apply absolute w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none;
+    background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .auth-card {
+    @apply w-full max-w-[400px] rounded-xl p-8 flex flex-col gap-6 relative z-10;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
+  }
+
+  .auth-logo {
+    @apply flex items-center justify-center gap-2.5;
+  }
+
+  .auth-logo-icon {
+    @apply w-8 h-8 rounded-lg bg-white flex items-center justify-center;
+  }
+
+  .auth-logo-text {
+    @apply font-bold text-sm tracking-tight text-white;
+  }
+
+  .auth-header {
+    @apply text-center flex flex-col gap-1.5;
+  }
+
+  .auth-title {
+    @apply text-xl font-semibold text-white;
+  }
+
+  .auth-subtitle {
+    @apply text-xs text-[#888];
+  }
+
+  .auth-form {
+    @apply flex flex-col gap-4;
+  }
+
+  .form-group {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .form-label {
+    @apply text-xs font-medium text-[#888];
+  }
+
+  .auth-error {
+    @apply flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-medium text-[#ccc];
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .auth-footer-text {
+    @apply text-xs text-[#555] text-center;
+  }
+
+  .auth-link {
+    @apply text-[#888] font-medium transition-colors hover:text-white;
+  }
 }
 
 @layer utilities {
