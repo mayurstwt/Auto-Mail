@@ -15,7 +15,7 @@ import { validateEmail, delay } from '@/lib/email-utils';
 import type { EmailResult, ParsedFormData } from '@/types';
 
 const MAX_FILE_SIZE_BYTES = 4.5 * 1024 * 1024;
-const SEND_DELAY_MS = 1500;
+const SEND_DELAY_MS = 1000;
 
 // ── Multipart parser ──────────────────────────────────────────────────────────
 

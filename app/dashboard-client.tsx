@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, ChangeEvent, useTransition } from 'react';
+import { useState, useEffect, useCallback, useRef, ChangeEvent, useTransition } from 'react';
 import type { Profile, EmailResult, HistoryEntry } from '@/types';
 import { validateEmail } from '@/lib/email-utils';
 import { createClient } from '@/lib/supabase/client';
@@ -333,6 +333,8 @@ function HistoryTab({ history, onClear }: { history: HistoryEntry[]; onClear: ()
 }
 
 // ── Send Tab ──────────────────────────────────────────────────────────────────
+const BATCH_SIZE = 3;
+
 function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: HistoryEntry[]) => void }) {
   const [emails, setEmails] = useState('');
   const [mode, setMode] = useState<SendMode>('specific');
@@ -341,6 +343,8 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
   const [results, setResults] = useState<EmailResult[] | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [progress, setProgress] = useState<{ current: number; total: number; batchIndex: number; totalBatches: number } | null>(null);
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     if (profiles.length > 0 && !selectedId) setSelectedId(profiles[0].id);
@@ -354,28 +358,61 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
       return groupEmails.map(email => ({
         email,
         status: 'failed' as const,
+        profileName: profile.name,
         error: 'Resume content not found for this profile.',
       }));
     }
 
-    // Convert base64 string to Blob
-    const binaryString = atob(profile.resumeData);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+    try {
+      // Convert base64 string to Blob
+      const binaryString = atob(profile.resumeData);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes.buffer], { type: profile.resumeMimeType });
+
+      const fd = new FormData();
+      fd.append('subject', profile.subject);
+      fd.append('body', profile.body);
+      fd.append('emails', groupEmails.join('\n'));
+      fd.append('resume', blob, profile.resumeName);
+
+      const res = await fetch('/api/send-emails', { method: 'POST', body: fd });
+      if (!res.ok) {
+        let errMsg = `Server error (${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData?.error) errMsg = errData.error;
+        } catch {
+          const txt = await res.text();
+          errMsg = txt.slice(0, 100) || errMsg;
+        }
+        return groupEmails.map(email => ({
+          email,
+          status: 'failed' as const,
+          profileName: profile.name,
+          error: errMsg,
+        }));
+      }
+
+      const data = await res.json();
+      return (data.results ?? []).map((r: EmailResult) => ({ ...r, profileName: profile.name }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error.';
+      return groupEmails.map(email => ({
+        email,
+        status: 'failed' as const,
+        profileName: profile.name,
+        error: msg,
+      }));
     }
-    const blob = new Blob([bytes.buffer], { type: profile.resumeMimeType });
+  };
 
-    const fd = new FormData();
-    fd.append('subject', profile.subject);
-    fd.append('body', profile.body);
-    fd.append('emails', groupEmails.join('\n'));
-    fd.append('resume', blob, profile.resumeName);
-
-    const res = await fetch('/api/send-emails', { method: 'POST', body: fd });
-    const data = await res.json();
-    return (data.results ?? []).map((r: EmailResult) => ({ ...r, profileName: profile.name }));
+  const handleCancel = () => {
+    cancelRef.current = true;
+    setStatus('Stopping after current batch completes…');
   };
 
   const handleSend = async () => {
@@ -383,10 +420,14 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
     if (emailList.length === 0) { setError('Please enter at least one email address.'); return; }
     if (profiles.length === 0) { setError('Add at least one profile first.'); return; }
 
-    setLoading(true); setError(''); setResults(null);
+    cancelRef.current = false;
+    setLoading(true);
+    setError('');
+    setResults([]);
+    setProgress({ current: 0, total: emailList.length, batchIndex: 0, totalBatches: 0 });
 
-    const toHistoryEntries = (results: EmailResult[], profile: Profile): HistoryEntry[] =>
-      results.map(r => ({
+    const toHistoryEntries = (batchRes: EmailResult[], profile: Profile): HistoryEntry[] =>
+      batchRes.map(r => ({
         id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         sentAt: Date.now(),
         email: r.email,
@@ -397,39 +438,78 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
         error: r.error,
       }));
 
-    try {
-      if (mode === 'specific') {
-        const profile = profiles.find(p => p.id === selectedId);
-        if (!profile) { setError('Selected profile not found.'); return; }
-        setStatus(`Sending via "${profile.name}"…`);
-        const res = await sendGroup(profile, emailList);
-        setResults(res);
-        onSent(toHistoryEntries(res, profile));
-      } else {
-        const groups = new Map<string, string[]>();
-        emailList.forEach(email => {
-          const p = profiles[Math.floor(Math.random() * profiles.length)];
-          if (!groups.has(p.id)) groups.set(p.id, []);
-          groups.get(p.id)!.push(email);
-        });
-        const all: EmailResult[] = [];
-        const histEntries: HistoryEntry[] = [];
-        let i = 0;
-        for (const [pid, grpEmails] of groups) {
-          i++;
-          const profile = profiles.find(p => p.id === pid)!;
-          setStatus(`Sending batch ${i} of ${groups.size} via "${profile.name}"…`);
-          const res = await sendGroup(profile, grpEmails);
-          all.push(...res);
-          histEntries.push(...toHistoryEntries(res, profile));
+    // Build micro-batches (tasks of up to BATCH_SIZE emails)
+    interface SendTask {
+      profile: Profile;
+      emails: string[];
+    }
+    const tasks: SendTask[] = [];
+
+    if (mode === 'specific') {
+      const profile = profiles.find(p => p.id === selectedId);
+      if (!profile) { setError('Selected profile not found.'); setLoading(false); return; }
+      for (let i = 0; i < emailList.length; i += BATCH_SIZE) {
+        tasks.push({ profile, emails: emailList.slice(i, i + BATCH_SIZE) });
+      }
+    } else {
+      // Group emails by randomly chosen profile
+      const groups = new Map<string, string[]>();
+      emailList.forEach(email => {
+        const p = profiles[Math.floor(Math.random() * profiles.length)];
+        if (!groups.has(p.id)) groups.set(p.id, []);
+        groups.get(p.id)!.push(email);
+      });
+      for (const [pid, grpEmails] of groups) {
+        const p = profiles.find(prof => prof.id === pid)!;
+        for (let i = 0; i < grpEmails.length; i += BATCH_SIZE) {
+          tasks.push({ profile: p, emails: grpEmails.slice(i, i + BATCH_SIZE) });
         }
-        setResults(all);
-        onSent(histEntries);
+      }
+    }
+
+    try {
+      let processed = 0;
+      for (let i = 0; i < tasks.length; i++) {
+        if (cancelRef.current) {
+          setStatus('Sending stopped.');
+          break;
+        }
+
+        const task = tasks[i];
+        setProgress({
+          current: processed,
+          total: emailList.length,
+          batchIndex: i + 1,
+          totalBatches: tasks.length,
+        });
+        setStatus(`Sending batch ${i + 1} of ${tasks.length} (${task.emails.length} email${task.emails.length > 1 ? 's' : ''}) via "${task.profile.name}"…`);
+
+        const batchRes = await sendGroup(task.profile, task.emails);
+        processed += task.emails.length;
+
+        // Append to live results and persist immediately to Supabase
+        setResults(prev => [...(prev ?? []), ...batchRes]);
+        onSent(toHistoryEntries(batchRes, task.profile));
+
+        setProgress({
+          current: processed,
+          total: emailList.length,
+          batchIndex: i + 1,
+          totalBatches: tasks.length,
+        });
+
+        // Pause briefly between batches to respect SMTP connection limits
+        if (i < tasks.length - 1 && !cancelRef.current) {
+          await new Promise(r => setTimeout(r, 600));
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error. Please try again.');
     } finally {
-      setLoading(false); setStatus('');
+      setLoading(false);
+      if (!cancelRef.current) {
+        setStatus('');
+      }
     }
   };
 
@@ -437,7 +517,9 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-base font-semibold">Send Emails</h2>
-        <p className="text-xs text-[#555] mt-0.5">Paste recruiter emails and pick which profile to send</p>
+        <p className="text-xs text-[#555] mt-0.5">
+          Paste recruiter emails and pick a profile · Dispatched in micro-batches to ensure deliverability
+        </p>
       </div>
 
       {profiles.length === 0 && (
@@ -454,7 +536,8 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
             {emailCount > 0 && <span className="ml-2 text-[#555]">{emailCount} address{emailCount !== 1 ? 'es' : ''}</span>}
           </label>
           <textarea id="emails-input" rows={8}
-            className="form-control font-mono text-sm resize-y"
+            disabled={loading}
+            className="form-control font-mono text-sm resize-y disabled:opacity-50"
             placeholder={'hr@company.com\nrecruiter@startup.io\njobs@bigtech.com'}
             value={emails} onChange={e => setEmails(e.target.value)} />
         </div>
@@ -464,11 +547,13 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
           <p className="text-xs text-[#888] font-medium">Profile Selection</p>
           <div className="flex gap-2 flex-wrap">
             <button id="mode-specific"
+              disabled={loading}
               className={`btn text-sm px-4 py-2 ${mode === 'specific' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setMode('specific')}>
               Specific Profile
             </button>
             <button id="mode-random"
+              disabled={loading}
               className={`btn text-sm px-4 py-2 flex items-center gap-2 ${mode === 'random' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setMode('random')}>
               <IcShuf /> Random per Email
@@ -477,6 +562,7 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
 
           {mode === 'specific' && profiles.length > 0 && (
             <select id="profile-select" className="form-control"
+              disabled={loading}
               value={selectedId} onChange={e => setSelectedId(e.target.value)}>
               {profiles.map(p => (
                 <option key={p.id} value={p.id}>{p.name} — {p.subject}</option>
@@ -495,18 +581,46 @@ function SendTab({ profiles, onSent }: { profiles: Profile[]; onSent: (entries: 
           <div className="text-xs text-[#888] p-3 card" role="alert">{error}</div>
         )}
 
-        {loading && status && (
-          <div className="flex items-center gap-2 text-xs text-[#666]">
-            <IcLoader />{status}
+        {/* Live Progress Bar Card */}
+        {loading && progress && (
+          <div className="card p-3.5 flex flex-col gap-2.5 animate-slide-up border-[#222]">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#ccc] flex items-center gap-2 font-medium truncate">
+                <IcLoader /> {status}
+              </span>
+              <span className="font-mono text-[#888] shrink-0 ml-2">
+                {progress.current} / {progress.total} ({progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0}%)
+              </span>
+            </div>
+            <div className="w-full bg-[#141414] rounded-full h-1.5 overflow-hidden border border-[#222]">
+              <div
+                className="bg-white h-full transition-all duration-300 ease-out"
+                style={{ width: `${progress.total > 0 ? Math.min(100, Math.round((progress.current / progress.total) * 100)) : 0}%` }}
+              />
+            </div>
+            <div className="flex justify-between items-center text-[11px] text-[#555] pt-0.5">
+              <span>Batch {progress.batchIndex} of {progress.totalBatches} • max 3 per batch</span>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="text-red-400 hover:text-red-300 transition-colors font-medium cursor-pointer"
+              >
+                Stop sending
+              </button>
+            </div>
           </div>
         )}
 
         <button id="send-btn" className="btn-primary w-full py-3" disabled={!canSend || loading} onClick={handleSend}>
-          {loading ? <><IcLoader /> Sending…</> : <><IcSend /> Send {emailCount > 0 ? `(${emailCount})` : ''}</>}
+          {loading ? (
+            <><IcLoader /> Sending ({progress ? `${progress.current}/${progress.total}` : 'in batches'})…</>
+          ) : (
+            <><IcSend /> Send {emailCount > 0 ? `(${emailCount})` : ''}</>
+          )}
         </button>
       </div>
 
-      {results && <ResultsPanel results={results} />}
+      {results && results.length > 0 && <ResultsPanel results={results} />}
     </div>
   );
 }
@@ -521,7 +635,7 @@ export default function DashboardClient({ user }: { user: { id: string; email: s
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
 
-  const fetchProfiles = async () => {
+  const fetchProfiles = useCallback(async () => {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -533,9 +647,9 @@ export default function DashboardClient({ user }: { user: { id: string; email: s
     } else if (data) {
       setProfiles(data.map(dbToProfile));
     }
-  };
+  }, [supabase, user.id]);
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     const { data, error } = await supabase
       .from('sent_mails')
       .select('*')
@@ -547,7 +661,7 @@ export default function DashboardClient({ user }: { user: { id: string; email: s
     } else if (data) {
       setHistory(data.map(dbToHistoryEntry));
     }
-  };
+  }, [supabase, user.id]);
 
   useEffect(() => {
     async function loadData() {
@@ -556,7 +670,7 @@ export default function DashboardClient({ user }: { user: { id: string; email: s
       setLoading(false);
     }
     loadData();
-  }, []);
+  }, [fetchProfiles, fetchHistory]);
 
   const openAdd  = () => setModal({ open: true, profile: {}, file: null, saving: false, error: '' });
   const openEdit = (p: Profile) => setModal({ open: true, profile: { ...p }, file: null, saving: false, error: '' });
